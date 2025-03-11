@@ -80,18 +80,10 @@ import UIKit
 
 
     private func contactToDictionary(_ contact: CNContact) -> [String: Any] {
-        var phoneNumbers: [[String: String]] = []
-        
-        for phoneNumber in contact.phoneNumbers {
-            let number = phoneNumber.value.stringValue
-            let label = CNLabeledValue<CNPhoneNumber>.localizedString(forLabel: phoneNumber.label ?? "")
-            phoneNumbers.append(["number": number, "label": label])
-        }
-        
         return [
             "id": contact.identifier,
             "name": contact.givenName + " " + contact.familyName,
-            "phone_numbers": phoneNumbers,
+            "phone_numbers": contact.phoneNumbers.map { $0.value.stringValue },
             "emails": contact.emailAddresses.map { $0.value as String }
         ]
     }

@@ -1,0 +1,22 @@
+PODS:
+  - delta_contacts (1.0.0):
+    - Flutter
+  - Flutter (1.0.0)
+
+DEPENDENCIES:
+  - delta_contacts (from `.symlinks/plugins/delta_contacts/ios`)
+  - Flutter (from `Flutter`)
+
+EXTERNAL SOURCES:
+  delta_contacts:
+    :path: ".symlinks/plugins/delta_contacts/ios"
+  Flutter:
+    :path: Flutter
+
+SPEC CHECKSUMS:
+  delta_contacts: ed80cb23722814b535116cc796e08d37335d5b1c
+  Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+
+PODFILE CHECKSUM: 819463e6a0290f5a72f145ba7cde16e8b6ef0796
+
+COCOAPODS: 1.16.2

@@ -57,7 +57,7 @@ class DeltaContactsPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
                     }
                     result.success(data)
                 } catch (e: Exception) {
-                    Log.e("Contact fetcher Plugin", e.message.toString())
+                    Log.e("Contact fetcher plugin", "Some error occoured")
                 }
             }
         } else {
@@ -162,10 +162,13 @@ class DeltaContactsPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             emailCursor?.close()
             contactObject["emails"] = emailList
 
-            if (contactObject["name"] as String != "" && (contactObject["phone_numbers"] as List<*>).isNotEmpty()) {
+            val contactName = contactObject["name"] as? String
+            val phoneNumbers = contactObject["phone_numbers"] as? List<*> ?: emptyList<Any>()
+            
+            if ((contactName != null && contactName.isNotEmpty()) || phoneNumbers.isNotEmpty()) {
                 contactList.add(contactObject)
             }
-          ++count
+            ++count
       } while (cursor.moveToNext())
   }
 
