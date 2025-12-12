@@ -5,10 +5,9 @@ import android.annotation.TargetApi
 import android.content.ContentResolver
 import android.content.Context
 import android.content.pm.PackageManager
-import android.database.Cursor
-import android.net.Uri
 import android.os.Build
 import android.provider.ContactsContract
+import android.telephony.PhoneNumberUtils
 import android.util.Log
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -17,164 +16,176 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 
 /** DeltaContactsPlugin */
-class DeltaContactsPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
-  /// The MethodChannel that will the communication between Flutter and native Android
-  ///
-  /// This local reference serves to register the plugin with the Flutter Engine and unregister it
-  /// when the Flutter Engine is detached from the Activity
+class DeltaContactsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
     private lateinit var activity: FlutterActivity
     private lateinit var contentResolver: ContentResolver
     private val mainScope = CoroutineScope(Dispatchers.Main)
-    private val contactList = mutableListOf<Map<String, Any>>()
 
-  override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    channel = MethodChannel(flutterPluginBinding.binaryMessenger, "delta_contacts")
-    channel.setMethodCallHandler(this)
-    context = flutterPluginBinding.applicationContext
-    contentResolver = context.contentResolver
-  }
+    override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        channel = MethodChannel(binding.binaryMessenger, "delta_contacts")
+        channel.setMethodCallHandler(this)
+        context = binding.applicationContext
+        contentResolver = context.contentResolver
+    }
 
-  override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-      if (checkPermission()) {
-        if (call.method == "getContacts") {
-          val lastUpdatedAt = call.argument<Long>("lastUpdatedAt") ?: 0
-            mainScope.launch {
-                try {
-                    val data: List<Map<String, Any>>
-                    withContext(Dispatchers.Default) {
-                        data = fetchContacts(lastUpdatedAt)
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "getContacts" -> {
+                if (!checkPermission()) {
+                    Log.e("DeltaContactsPlugin", "Contact permission not granted")
+                    result.error("permission_denied", "READ_CONTACTS permission not granted", null)
+                    return
+                }
+
+                val lastUpdatedAt = call.argument<Long>("lastUpdatedAt") ?: 0L
+
+                mainScope.launch {
+                    try {
+                        val data = fetchContactsAsMaps(lastUpdatedAt)
+                        result.success(data)
+                    } catch (e: SecurityException) {
+                        Log.e("DeltaContactsPlugin", "SecurityException while reading contacts", e)
+                        result.error("security_error", e.message ?: "security exception", null)
+                    } catch (e: Exception) {
+                        Log.e("DeltaContactsPlugin", "Error fetching contacts", e)
+                        result.error("fetch_error", e.message ?: "unknown error", null)
                     }
-                    result.success(data)
-                } catch (e: Exception) {
-                    Log.e("Contact fetcher plugin", "Some error occoured")
                 }
             }
-        } else {
-            result.notImplemented()
+            else -> result.notImplemented()
         }
-      } else {
-        Log.e("Contact fetcher Plugin", "Contact permission is not enabled")
-        result.error("Contact Permission not enabled", "", ArrayList<JSONObject>().toString())
-      }
-  }
+    }
 
-  override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-    channel.setMethodCallHandler(null)
-  }
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        channel.setMethodCallHandler(null)
+    }
 
-  override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-      activity = binding.activity as FlutterActivity
-  }
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity as FlutterActivity
+    }
 
-  override fun onDetachedFromActivityForConfigChanges() {
-      channel.setMethodCallHandler(null)
-  }
+    override fun onDetachedFromActivityForConfigChanges() {
+    }
 
-  override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-      activity = binding.activity as FlutterActivity
-  }
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity as FlutterActivity
+    }
 
-  override fun onDetachedFromActivity() {
-      channel.setMethodCallHandler(null)
-  }
+    override fun onDetachedFromActivity() {
+    }
 
-  @TargetApi(Build.VERSION_CODES.M)
-  private fun fetchContacts(lastUpdatedAt: Long): List<Map<String, Any>> {
-      val selection = if (lastUpdatedAt > 0) 
-            "${ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP} > ?" 
-      else 
-          null
-      val selectionArgs = if (lastUpdatedAt > 0) 
-          arrayOf(lastUpdatedAt.toString()) 
-      else 
-          null
-      val cursor = contentResolver.query(
-          ContactsContract.Contacts.CONTENT_URI, arrayOf(
-              ContactsContract.Contacts._ID,
-              ContactsContract.Contacts.DISPLAY_NAME,
-              ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP
-          ), selection, selectionArgs, null, null
-      )
-      contactList.clear()
-      if (cursor != null && cursor.moveToFirst()) {
-          bindDataFromCursor(cursor)
-          cursor.close()
-      }
-      return contactList
-  }
+    private fun checkPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context, Manifest.permission.READ_CONTACTS
+        ) == PackageManager.PERMISSION_GRANTED
+    }
 
-  private fun bindDataFromCursor(cursor: Cursor) {
-      var count = 0
-      do {
-          val contactObject = mutableMapOf<String, Any>()
-          val id = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts._ID))
-          contactObject["id"] = id
-          contactObject["name"] = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME))
-          contactObject["last_updated_at"] = cursor.getLong(cursor.getColumnIndex(ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP))
-          val phoneCursor = contentResolver.query(
-              ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-              null,
-              ContactsContract.CommonDataKinds.Phone.CONTACT_ID + " =?",
-              arrayOf(id),
-              null
-          )
-          val phoneNumberList = mutableListOf<String>()
-          while (phoneCursor!!.moveToNext()) {
-                phoneNumberList.add(
-                    phoneCursor.getString(
-                        phoneCursor.getColumnIndex(
-                            ContactsContract.CommonDataKinds.Phone.NUMBER
-                        )
-                    )
-                )
-            }
-            phoneCursor.close()
-            contactObject["phone_numbers"] = phoneNumberList
+    @TargetApi(Build.VERSION_CODES.M)
+    private suspend fun fetchContactsAsMaps(lastUpdatedAt: Long = 0L): List<Map<String, Any>> =
+        withContext(Dispatchers.IO) {
+            val mimePhone = ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE
+            val mimeEmail = ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE
 
-            val emailCursor = contentResolver.query(
-                ContactsContract.CommonDataKinds.Email.CONTENT_URI,
-                null,
-                ContactsContract.CommonDataKinds.Email.CONTACT_ID + " =?",
-                arrayOf(id),
-                null
+            val projection = arrayOf(
+                ContactsContract.Data.CONTACT_ID,
+                ContactsContract.Contacts.DISPLAY_NAME,
+                ContactsContract.Data.MIMETYPE,
+                ContactsContract.CommonDataKinds.Phone.NUMBER,
+                ContactsContract.CommonDataKinds.Email.ADDRESS,
+                ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP
             )
-            val emailList = mutableListOf<String>()
-            while (emailCursor != null && emailCursor.moveToNext()) {
-                emailList.add(
-                    emailCursor.getString(
-                        emailCursor.getColumnIndex(
-                            ContactsContract.CommonDataKinds.Email.ADDRESS
+
+            val selBuilder = StringBuilder("${ContactsContract.Data.MIMETYPE} IN (?, ?)")
+            val selArgsList = mutableListOf(mimePhone, mimeEmail)
+            if (lastUpdatedAt > 0L) {
+                selBuilder.append(" AND ${ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP} > ?")
+                selArgsList.add(lastUpdatedAt.toString())
+            }
+            val selection = selBuilder.toString()
+            val selectionArgs = selArgsList.toTypedArray()
+
+            val contactMap = LinkedHashMap<String, MutableMap<String, Any?>>()
+
+            contentResolver.query(
+                ContactsContract.Data.CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                null
+            )?.use { cursor ->
+                val idxId = cursor.getColumnIndexOrThrow(ContactsContract.Data.CONTACT_ID)
+                val idxName = cursor.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME)
+                val idxMime = cursor.getColumnIndexOrThrow(ContactsContract.Data.MIMETYPE)
+                val idxPhone = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER) // may be -1
+                val idxEmail = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.ADDRESS) // may be -1
+
+                while (cursor.moveToNext()) {
+                    val id = cursor.getString(idxId) ?: continue
+                    val name = cursor.getString(idxName) ?: ""
+                    val mime = cursor.getString(idxMime) ?: ""
+
+                    val contact = contactMap.getOrPut(id) {
+                        mutableMapOf<String, Any?>(
+                            "id" to id,
+                            "name" to name,
+                            "phone_numbers" to linkedSetOf<String>(),
+                            "emails" to linkedSetOf<String>()
                         )
+                    }
+
+                    if ((contact["name"] as? String).isNullOrEmpty() && name.isNotEmpty()) {
+                        contact["name"] = name
+                    }
+
+                    if (mime == mimePhone && idxPhone >= 0) {
+                        val raw = cursor.getString(idxPhone)
+                        if (!raw.isNullOrBlank()) {
+                            val normalized = PhoneNumberUtils.normalizeNumber(raw)
+                            if (normalized.isNotBlank()) {
+                                @Suppress("UNCHECKED_CAST")
+                                val phones = contact["phone_numbers"] as MutableSet<String>
+                                phones.add(normalized)
+                            }
+                        }
+                    } else if (mime == mimeEmail && idxEmail >= 0) {
+                        val e = cursor.getString(idxEmail)
+                        if (!e.isNullOrBlank()) {
+                            @Suppress("UNCHECKED_CAST")
+                            val emails = contact["emails"] as MutableSet<String>
+                            emails.add(e)
+                        }
+                    }
+                }
+            }
+
+            val out = ArrayList<Map<String, Any>>(contactMap.size)
+            for ((_, v) in contactMap) {
+                val id = v["id"] as String
+                val name = (v["name"] as? String).orEmpty()
+                @Suppress("UNCHECKED_CAST")
+                val phones = (v["phone_numbers"] as? Set<String>)?.toList().orEmpty()
+                @Suppress("UNCHECKED_CAST")
+                val emails = (v["emails"] as? Set<String>)?.toList().orEmpty()
+
+                if (name.isNotEmpty() || phones.isNotEmpty()) {
+                    val map = mapOf<String, Any>(
+                        "id" to id,
+                        "name" to name,
+                        "phone_numbers" to phones,
+                        "emails" to emails
                     )
-                )
+                    out.add(map)
+                }
             }
-            emailCursor?.close()
-            contactObject["emails"] = emailList
 
-            val contactName = contactObject["name"] as? String
-            val phoneNumbers = contactObject["phone_numbers"] as? List<*> ?: emptyList<Any>()
-            
-            if ((contactName != null && contactName.isNotEmpty()) || phoneNumbers.isNotEmpty()) {
-                contactList.add(contactObject)
-            }
-            ++count
-      } while (cursor.moveToNext())
-  }
-
-  private fun checkPermission(): Boolean {
-    return ContextCompat.checkSelfPermission(
-        context, Manifest.permission.READ_CONTACTS
-    ) == PackageManager.PERMISSION_GRANTED
-  }
+            out
+        }
 }

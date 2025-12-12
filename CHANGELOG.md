@@ -5,3 +5,7 @@
 ## 1.0.1
 
 * Optimised contact fetching in iOS
+
+## 1.1.0
+
+* Optimised contact fetching in Android
