@@ -2,32 +2,40 @@ package com.dartcoders.delta_contacts
 
 import android.Manifest
 import android.annotation.TargetApi
+import android.app.Activity
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import android.util.Log
 import androidx.core.content.ContextCompat
-import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.PluginRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** DeltaContactsPlugin */
-class DeltaContactsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
+class DeltaContactsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware, PluginRegistry.ActivityResultListener {
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
-    private lateinit var activity: FlutterActivity
+    private var activity: Activity? = null
     private lateinit var contentResolver: ContentResolver
     private val mainScope = CoroutineScope(Dispatchers.Main)
+    private var pendingResult: MethodChannel.Result? = null
+
+    companion object {
+        private const val REQ_PICK_CONTACT = 1001
+    }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(binding.binaryMessenger, "delta_contacts")
@@ -60,6 +68,26 @@ class DeltaContactsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
                     }
                 }
             }
+            "pickContact" -> {
+                if (pendingResult != null) {
+                    result.error("already_active", "Another picker is active", null)
+                    return
+                }
+                try {
+                    val act = activity
+                    if (act == null) {
+                        result.error("no_activity", "Activity not available", null)
+                        return
+                    }
+                    val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+                    pendingResult = result
+                    act.startActivityForResult(intent, REQ_PICK_CONTACT)
+                } catch (e: Exception) {
+                    pendingResult = null
+                    Log.e("DeltaContactsPlugin", "Failed to launch contact picker", e)
+                    result.error("picker_error", e.message ?: "failed to launch picker", null)
+                }
+            }
             else -> result.notImplemented()
         }
     }
@@ -69,17 +97,25 @@ class DeltaContactsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-        activity = binding.activity as FlutterActivity
+        activity = binding.activity
+        binding.addActivityResultListener(this)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
+        pendingResult?.success(null)
+        pendingResult = null
+        activity = null
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        activity = binding.activity as FlutterActivity
+        activity = binding.activity
+        binding.addActivityResultListener(this)
     }
 
     override fun onDetachedFromActivity() {
+        pendingResult?.success(null)
+        pendingResult = null
+        activity = null
     }
 
     private fun checkPermission(): Boolean {
@@ -188,4 +224,66 @@ class DeltaContactsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
 
             out
         }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != REQ_PICK_CONTACT) return false
+        val result = pendingResult
+        pendingResult = null
+        if (resultCode != Activity.RESULT_OK || data?.data == null) {
+            result?.success(null)
+            return true
+        }
+        mainScope.launch {
+            try {
+                val contact = withContext(Dispatchers.IO) {
+                    fetchContactFromPhoneUri(data.data!!)
+                }
+                result?.success(contact)
+            } catch (e: Exception) {
+                Log.e("DeltaContactsPlugin", "Failed to read picked contact", e)
+                result?.error("read_error", e.message, null)
+            }
+        }
+        return true
+    }
+
+    private fun fetchContactFromPhoneUri(uri: Uri): Map<String, Any>? {
+        val phoneProjection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.NUMBER,
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.CONTACT_ID
+        )
+        var number: String? = null
+        var name: String = ""
+        var contactId: String? = null
+        contentResolver.query(uri, phoneProjection, null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val idxNum = c.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                val idxName = c.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val idxCid = c.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
+                number = c.getString(idxNum)
+                name = c.getString(idxName) ?: ""
+                contactId = c.getLong(idxCid).toString()
+            }
+        }
+        val phones = mutableListOf<String>()
+        number?.let {
+            val normalized = PhoneNumberUtils.normalizeNumber(it)
+            if (normalized.isNotBlank() && !phones.contains(normalized)) {
+                phones.add(normalized)
+            }
+        }
+        val emails = mutableListOf<String>()
+
+        return if (contactId == null && phones.isEmpty() && name.isEmpty()) {
+            null
+        } else {
+            mapOf(
+                "id" to (contactId ?: ""),
+                "name" to name,
+                "phone_numbers" to phones,
+                "emails" to emails
+            )
+        }
+    }
 }

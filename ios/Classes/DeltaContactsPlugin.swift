@@ -4,8 +4,9 @@ import Flutter
 import Foundation
 import UIKit
 
-@objc public class DeltaContactsPlugin: NSObject, FlutterPlugin {
+@objc public class DeltaContactsPlugin: NSObject, FlutterPlugin, CNContactPickerDelegate {
     private let contactStore = CNContactStore()
+    private var pendingResult: FlutterResult?
     
     @objc public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "delta_contacts", binaryMessenger: registrar.messenger())
@@ -38,6 +39,23 @@ import UIKit
             }
         }
         break
+        case "pickContact":
+            if pendingResult != nil {
+                result(FlutterError(code: "already_active", message: "Another picker is active", details: nil))
+                return
+            }
+            DispatchQueue.main.async {
+                guard let vc = self.topViewController() else {
+                    result(FlutterError(code: "no_view_controller", message: "Unable to find a view controller to present the picker", details: nil))
+                    return
+                }
+                let picker = CNContactPickerViewController()
+                picker.delegate = self
+                picker.predicateForSelectionOfContact = NSPredicate(value: true)
+                self.pendingResult = result
+                vc.present(picker, animated: true, completion: nil)
+            }
+            break
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -144,5 +162,35 @@ import UIKit
 
     enum ContactError: Error {
         case accessDenied
+    }
+
+    public func contactPicker(_ picker: CNContactPickerViewController, didSelect contact: CNContact) {
+        let dict = contactToDictionary(contact)
+        if let cb = pendingResult {
+            cb(dict)
+            pendingResult = nil
+        }
+    }
+
+    public func contactPickerDidCancel(_ picker: CNContactPickerViewController) {
+        if let cb = pendingResult {
+            cb(nil)
+            pendingResult = nil
+        }
+    }
+
+    private func topViewController(base: UIViewController? = UIApplication.shared.connectedScenes
+        .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+        .first?.rootViewController) -> UIViewController? {
+        if let nav = base as? UINavigationController {
+            return topViewController(base: nav.visibleViewController)
+        }
+        if let tab = base as? UITabBarController, let selected = tab.selectedViewController {
+            return topViewController(base: selected)
+        }
+        if let presented = base?.presentedViewController {
+            return topViewController(base: presented)
+        }
+        return base
     }
 }

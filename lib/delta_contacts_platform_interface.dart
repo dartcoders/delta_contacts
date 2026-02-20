@@ -26,4 +26,6 @@ abstract class DeltaContactsPlatform extends PlatformInterface {
   Future getAndroidContacts({num? lastUpdatedAt});
 
   Future getIosContacts({String? historyToken});
+
+  Future pickContact();
 }

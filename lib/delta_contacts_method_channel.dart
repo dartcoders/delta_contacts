@@ -24,4 +24,10 @@ class MethodChannelDeltaContacts extends DeltaContactsPlatform {
     });
     return contacts ?? {};
   }
+
+  @override
+  Future pickContact() async {
+    final contact = await methodChannel.invokeMethod('pickContact');
+    return contact;
+  }
 }

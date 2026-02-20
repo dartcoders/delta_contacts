@@ -9,3 +9,8 @@
 ## 1.1.0
 
 * Optimised contact fetching in Android
+
+
+## 1.2.0
+
+* Added support for native contact picker

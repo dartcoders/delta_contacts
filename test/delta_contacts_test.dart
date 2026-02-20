@@ -16,6 +16,11 @@ class MockDeltaContactsPlatform
   Future getIosContacts({String? historyToken}) {
     return Future.value([]);
   }
+
+  @override
+  Future pickContact() {
+    return Future.value();
+  }
 }
 
 void main() {

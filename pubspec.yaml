@@ -1,6 +1,6 @@
 name: delta_contacts
 description: "A Flutter plugin for accessing device contacts."
-version: 1.1.0
+version: 1.2.0
 homepage: https://github.com/dartcoders/delta_contacts
 
 environment:
