@@ -21,7 +21,18 @@ History token is timestamp in [millisecondsSinceEpoch] in Android and [Contact S
 final contacts = await deltaContacts.getContacts(historyToken: historyToken);
 ```
 
+## Pick Contact
 
+Open the native contact picker and get the selected contact.
+```dart
+final contact = await deltaContacts.pickContact();
 
+if (contact != null) {
+  print(contact.name);
+  print(contact.phoneNumbers);
+  print(contact.emails);
+}
+```
 
+Returns `ContactData?` — `null` if the user cancels the picker.
 
