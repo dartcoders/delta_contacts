@@ -155,7 +155,7 @@ class DeltaContactsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
                 projection,
                 selection,
                 selectionArgs,
-                null
+                "${ContactsContract.Contacts.DISPLAY_NAME} ASC"
             )?.use { cursor ->
                 val idxId = cursor.getColumnIndexOrThrow(ContactsContract.Data.CONTACT_ID)
                 val idxName = cursor.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME)

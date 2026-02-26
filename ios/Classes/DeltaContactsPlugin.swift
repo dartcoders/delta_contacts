@@ -108,6 +108,7 @@ import UIKit
 
     private func performInitialFetch(completion: @escaping (Result<([CNContact], [CNContact], Data?), Error>) -> Void) throws {
         let request = CNContactFetchRequest(keysToFetch: keysToFetch)
+        request.sortOrder = .givenName
         var contacts: [CNContact] = []
         try contactStore.enumerateContacts(with: request) { contact, _ in
             contacts.append(contact)
