@@ -14,3 +14,7 @@
 ## 1.2.0
 
 * Added support for native contact picker
+
+## 1.3.0
+
+* Contacts are now fetched in Sort by Name ASC
